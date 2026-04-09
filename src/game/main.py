@@ -1,5 +1,3 @@
-"""GLUT window and main loop: 2D ortho view, grid, obstacles, agent at origin."""
-
 from __future__ import annotations
 
 import sys
