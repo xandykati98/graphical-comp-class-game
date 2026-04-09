@@ -29,13 +29,33 @@ from OpenGL.GLUT import (
     glutPostRedisplay,
     glutReshapeFunc,
     glutSwapBuffers,
+    glutReshapeWindow
 )
 
 
 WINDOW_W: Final[int] = 900
 WINDOW_H: Final[int] = 700
 
+cell_size = 50
+
+class Grid:
+    def __init__(self, width: int, height: int):
+        self.width = width
+        self.height = height
+        self.grid = [[0 for _ in range(width)] for _ in range(height)]
+
+is_new_phase = True
+phase = {
+    "grid": Grid(10, 10),
+    "movements_left": 10,
+}
+
 def draw_grid() -> None:
+    global is_new_phase, phase
+    if is_new_phase:
+        grid = phase["grid"]
+        glutReshapeWindow(grid.width * cell_size, grid.height * cell_size)
+        is_new_phase = False
     pass
 
 def main() -> None:
