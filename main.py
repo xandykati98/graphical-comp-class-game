@@ -1,6 +1,4 @@
-def main():
-    print("Hello from graphical-computing-class-game!")
-
+from src.game.main import main
 
 if __name__ == "__main__":
     main()
