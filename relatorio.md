@@ -28,22 +28,56 @@ O mundo do jogo é representado por uma **grade 2D** (matriz inteira) carregada 
 
 Além da grade estática, os seguintes objetos dinâmicos existem em tempo de execução:
 
-| Objeto        | Cor (RGB normalizado) | Descrição                                         |
-|---------------|-----------------------|---------------------------------------------------|
-| Agente        | (0.2, 0.9, 0.2) verde | Controlado pelo jogador via WASD                  |
-| Caixa         | (0.8, 0.5, 0.0) laranja | Empurrada pelo agente na mesma direção do movimento |
-| Meta          | (1.0, 0.0, 0.0) vermelho | Célula estática; caixa sobre ela fica marrom escuro |
-| Parede        | (0.5, 0.5, 0.5) cinza  | Obstáculo intransponível                          |
-| Scale Toggle  | (0.0, 0.0, 1.0) azul  | Célula especial de escala (definida, não implementada) |
-| Rotate Pad    | (0.0, 1.0, 1.0) ciano | Célula especial: rotaciona a posição do agente 90° |
+| Objeto        | Visual                              | Descrição                                                  |
+|---------------|-------------------------------------|------------------------------------------------------------|
+| Agente        | Quadrado verde com dois olhos pretos | Controlado pelo jogador via WASD                          |
+| Caixa         | Quadrado laranja com bordas e listras verticais em marrom escuro | Empurrada pelo agente na mesma direção do movimento |
+| Meta          | Quadrado vermelho vivo com fundo vermelho escuro | Célula estática; indica onde a caixa deve ser colocada |
+| Parede        | Textura de tijolos cinza com linhas de argamassa escura e juntas alternadas | Obstáculo intransponível |
+| Scale Toggle  | Quadrado azul sólido (0.0, 0.0, 1.0) | Célula especial de escala (definida, não implementada)  |
+| Rotate Pad    | Arco ciano de 270° com seta triangular na ponta, sobre fundo ciano escuro | Rotaciona a posição do agente 90° no sentido horário |
 
 Cada objeto dinâmico (agente e caixas) possui uma posição `(row, col)` em coordenadas de grade.
 
 ---
 
-## 3. SRO – Sistema de Referência do Objeto
+## 3. Renderização dos Objetos
 
-### 3.1 Sistema de Referência Global (tela)
+Cada tipo de célula possui uma função de desenho dedicada, todas operando em coordenadas de pixel (pixel = unidade de mundo na projeção ortográfica).
+
+### 3.1 Agente (`draw_player`)
+
+Desenhado com `GL_QUADS`. O corpo é um quadrado verde `(0.2, 0.9, 0.2)` preenchendo a célula. Dois olhos pretos quadrados são posicionados a 20% e 80% da largura, a 60% da altura, com tamanho de 10% do `cell_size`.
+
+### 3.2 Caixa (`draw_box`)
+
+Desenhado com `GL_QUADS`. Corpo laranja `(0.8, 0.5, 0.0)`. Sobre ele são desenhadas quatro bordas em marrom escuro `(0.6, 0.35, 0.0)` (10% de espessura) e três listras verticais centralizadas em 25%, 50% e 75% da largura, simulando as tábuas de um caixote.
+
+### 3.3 Meta (`draw_goal`)
+
+Desenhado com `glRectf`. Um quadrado vermelho vivo `(1.0, 0.12, 0.12)` com 10% de recuo em relação às bordas da célula, sobre um fundo vermelho escuro `(0.18, 0.0, 0.0)` que preenche a célula inteira. O recuo visual indica o espaço reservado para a caixa.
+
+### 3.4 Rotate Pad (`draw_rotate_pad`)
+
+Desenhado em duas etapas sobre fundo ciano escuro `(0.0, 0.13, 0.15)`:
+
+1. **Arco** (`GL_TRIANGLE_STRIP`): banda circular de 270° (de 120° a 390°) entre raio interno (22% do `cell_size`) e externo (38%). Cor ciano `(0.0, 0.85, 0.95)`. Com Y apontando para baixo, ângulo crescente equivale a sentido horário na tela.
+2. **Seta** (`GL_TRIANGLES`): triângulo posicionado na extremidade do arco (ângulo 390° = 30°). A ponta aponta na direção tangente `(-sin θ, cos θ)` e a base se estende na direção radial `(cos θ, sin θ)`, indicando claramente a rotação horária.
+
+### 3.5 Parede (`draw_wall`)
+
+Desenhado com `GL_QUADS` e `glRectf`. Base cinza `(0.55, 0.55, 0.55)`. Sobre ela são aplicadas linhas de argamassa cinza escuro `(0.3, 0.3, 0.3)` com espessura de 7% do `cell_size`:
+
+- Linha horizontal no topo da célula (sempre visível).
+- Linha horizontal na metade da célula, dividindo-a em duas fiadas de tijolos.
+- Junta vertical em 50% na fiada superior.
+- Juntas verticais em 25% e 75% na fiada inferior (alternadas), criando o padrão clássico de tijolos.
+
+---
+
+## 4. SRO – Sistema de Referência do Objeto
+
+### 4.1 Sistema de Referência Global (tela)
 
 A projeção utilizada é **ortográfica 2D** configurada via `glOrtho`:
 
@@ -60,7 +94,7 @@ O tamanho da janela é ajustado automaticamente para `num_colunas × cell_size` 
 
 ---
 
-### 3.2 SRO da Grade (Grid)
+### 4.2 SRO da Grade (Grid)
 
 A grade é o objeto base. Seu SRO coincide com o sistema global:
 
@@ -74,7 +108,7 @@ A célula `(0, 0)` fica no canto **superior esquerdo** da janela.
 
 ---
 
-### 3.3 SRO do Agente (Player)
+### 4.3 SRO do Agente (Player)
 
 - Representado como um quadrado de `cell_size × cell_size` pixels.
 - Posição lógica armazenada em coordenadas de grade: `(player.x, player.y)` onde `x = row`, `y = col`.
@@ -85,7 +119,7 @@ A célula `(0, 0)` fica no canto **superior esquerdo** da janela.
 
 ---
 
-### 3.4 SRO da Caixa (Box)
+### 4.4 SRO da Caixa (Box)
 
 - Mesmo sistema do agente: posição lógica `(box.x, box.y)` em coordenadas de grade.
 - Mapeamento para pixels idêntico ao do agente.
@@ -93,16 +127,16 @@ A célula `(0, 0)` fica no canto **superior esquerdo** da janela.
 
 ---
 
-### 3.5 SRO das Células Especiais (Rotate Pad / Scale Toggle)
+### 4.5 SRO das Células Especiais (Rotate Pad / Scale Toggle)
 
 - São células estáticas da grade; seu SRO é o mesmo da grade.
 - Não possuem estado próprio, apenas alteram o estado do agente ao contato.
 
 ---
 
-## 4. Transformações Geométricas Implementadas
+## 5. Transformações Geométricas Implementadas
 
-### 4.1 Translação
+### 5.1 Translação
 
 O agente se move pressionando **W / A / S / D**. Cada tecla aplica um delta `(dx, dy)` à posição em grade:
 
@@ -117,7 +151,7 @@ A translação verifica colisão com paredes e limites do mapa antes de ser apli
 
 Em coordenadas de tela, a nova posição em pixels é simplesmente `nova_posição_grade × cell_size`.
 
-### 4.2 Rotação
+### 5.2 Rotação
 
 Ao pisar em um **Rotate Pad** (célula cyan), a posição do agente é rotacionada **90° no sentido horário** em torno do **centro geométrico** da grade.
 
@@ -140,13 +174,13 @@ Esta operação é equivalente à rotação matricial:
 
 A rotação é bloqueada caso a célula destino seja uma parede ou limite do mapa. O flag `just_rotated` evita aplicações múltiplas enquanto o agente permanece sobre o pad.
 
-### 4.3 Escala (Scale Toggle)
+### 5.3 Escala (Scale Toggle)
 
 A célula **Scale Toggle** (azul) está definida no código e mapeada no sistema de células, mas a transformação de escala ainda não foi implementada (marcada com `pass`). A estrutura está preparada para aplicar uma mudança de escala visual ao agente ao pisar nessa célula.
 
 ---
 
-## 5. Controles
+## 6. Controles
 
 | Tecla | Ação                              |
 |-------|-----------------------------------|
@@ -159,7 +193,7 @@ Não há suporte a mouse nesta versão.
 
 ---
 
-## 6. Objetivo e Condição de Vitória
+## 7. Objetivo e Condição de Vitória
 
 O agente deve empurrar **todas as caixas** (laranja) sobre as **células-meta** (vermelho). Quando isso ocorre, a função `check_victory()` detecta que todas as caixas estão sobre metas (`BOX_ON_GOAL`) e exibe a mensagem **"Fase completa!"** no título da janela, desabilitando a entrada de teclado.
 
@@ -167,7 +201,7 @@ O jogo também registra um contador de movimentos restantes (`movements_left`), 
 
 ---
 
-## 7. Estrutura do Projeto
+## 8. Estrutura do Projeto
 
 ```
 src/
@@ -182,7 +216,7 @@ O mapa da fase 1 é uma grade 7×7 com borda de paredes, uma caixa em `(3,3)`, a
 
 ---
 
-## 8. Tecnologias Utilizadas
+## 9. Tecnologias Utilizadas
 
 - **Python 3**
 - **PyOpenGL** (OpenGL + GLUT) – renderização e janela
