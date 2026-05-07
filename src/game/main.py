@@ -45,6 +45,7 @@ from OpenGL.GLUT import (
     glutSwapBuffers,
     glutReshapeWindow,
     glutSetWindowTitle,
+    glutTimerFunc,
 )
 
 
@@ -114,23 +115,25 @@ class Box:
     def get_position(self) -> Position:
         return self.position
 
-def load_map_data(phase_number: int) -> tuple[Grid, list[int], list[list[int]], int]:
+def load_map_data(phase_number: int) -> tuple[Grid, list[int], list[list[int]], int, int]:
     """
     Read src/game/phases/{phase}/map.json and return the grid plus spawn metadata.
 
     Expected JSON keys: map (2D int array), agent_start_position, boxes_start_positions.
-    Cell values: 0 empty, 1 obstacle, 2 goal/interest (colors chosen in draw_grid).
+    Optional keys: movements_limit (default 10), agent_start_size (default 1).
+    Cell values: 0 empty, 1 obstacle, 2 goal, 3 scale_toggle, 4 rotate_pad.
     """
     with open(f"src/game/phases/{phase_number:03d}/map.json", "r") as file:
         map_data = json.load(file)
     matrix = map_data["map"]
     agent_start_position = map_data["agent_start_position"]
     boxes_start_positions = map_data["boxes_start_positions"]
-    movements_limit = map_data.get("movements_limit", 10) # Default 10 if not specified
+    movements_limit = map_data.get("movements_limit", 10)
+    agent_start_size = map_data.get("agent_start_size", 1)
     # Grid(len(matrix), len(matrix[0])) => width = row count, height = col count.
     grid_object = Grid(len(matrix), len(matrix[0]))
     grid_object.grid = matrix
-    return grid_object, agent_start_position, boxes_start_positions, movements_limit
+    return grid_object, agent_start_position, boxes_start_positions, movements_limit, agent_start_size
 
 
 def build_phase(phase_number: int) -> tuple[Grid, Player, list[Box], int]:
@@ -141,9 +144,10 @@ def build_phase(phase_number: int) -> tuple[Grid, Player, list[Box], int]:
       boxes:  A list of Box instances placed at their start positions.
       movements_limit: The maximum number of movements allowed.
     """
-    grid_object, agent_start_position, boxes_start_positions, limit = load_map_data(phase_number)
+    grid_object, agent_start_position, boxes_start_positions, limit, agent_start_size = load_map_data(phase_number)
 
     player = Player(Position(agent_start_position[0], agent_start_position[1]))
+    player.size = agent_start_size
     
     boxes = []
     for box_pos in boxes_start_positions:
@@ -159,10 +163,8 @@ def update_window_title():
         msg = f"{phase['movements_left']} Movimentos faltando!"
         glutSetWindowTitle(msg.encode())
     elif state == "won":
-        next_num = current_phase + 1
-        next_file = f"src/game/phases/{next_num:03d}/map.json"
-        if os.path.isfile(next_file):
-            glutSetWindowTitle(b"Aperte N para ir para a proxima fase!")
+        if os.path.isfile(_next_phase_path(current_phase + 1)):
+            glutSetWindowTitle(b"Fase concluida! Proxima fase em 2s... (N para avancar ja)")
         else:
             glutSetWindowTitle(b"Voce ganhou! Parabens!")
     elif state == "lost":
@@ -781,7 +783,32 @@ def try_step(dx: int, dy: int) -> bool:
     # If we reach here, the move was not successful (either a wall, out of bounds, or an immovable box).
     return False
 
-def handle_movement(dx, dy):
+NEXT_PHASE_DELAY_MS: Final[int] = 2000
+
+
+def _next_phase_path(phase_number: int) -> str:
+    return f"src/game/phases/{phase_number:03d}/map.json"
+
+
+def _advance_phase_timer(value: int) -> None:
+    """glutTimerFunc callback: load next phase if state is still 'won'."""
+    global current_phase
+    if phase["state"] != "won":
+        return
+    next_num = current_phase + 1
+    if os.path.isfile(_next_phase_path(next_num)):
+        current_phase = next_num
+        restart_phase()
+        glutPostRedisplay()
+
+
+def _schedule_next_phase_if_available() -> None:
+    """Start the auto-advance timer when the next phase file exists."""
+    if os.path.isfile(_next_phase_path(current_phase + 1)):
+        glutTimerFunc(NEXT_PHASE_DELAY_MS, _advance_phase_timer, 0)
+
+
+def handle_movement(dx: int, dy: int) -> None:
     """Process one step of movement, update counters and game state."""
     player = phase["player"]
     player.just_rotated = False
@@ -790,11 +817,11 @@ def handle_movement(dx, dy):
         phase["movements_left"] -= 1
         update_window_title()
 
-        
         # Check for victory or loss
         if phase["state"] == "playing" and check_victory():
             phase["state"] = "won"
             update_window_title()
+            _schedule_next_phase_if_available()
         elif phase["movements_left"] <= 0 and phase["state"] == "playing":
             phase["state"] = "lost"
             update_window_title()
