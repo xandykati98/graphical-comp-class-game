@@ -1,223 +1,32 @@
-# Relatório – Trabalho Prático G1: Jogo Pedagógico
-**Título:** T1-CG-jogo1  
-**Arquivo fonte:** jogo1-cg-t1.py  
-**Disciplina:** Computação Gráfica  
-**Data:** 07/05/2026
+Relatório Trabalho Prático G1
+Nomes: Alexandre dos Santos, Vinícius Amorim
 
----
+1. Descrição do jogo
+O projeto é um jogo de puzzle baseado no Sokoban, ambientado em uma grade 2D. O jogador controla um slime que se move nas quatro direções (WASD) e pode empurrar caixas. O objetivo é posicionar todas as caixas sobre as células do tipo GOAL. O jogo inclui dois pisos especiais: ao pisar em um ROTATE_PAD, o jogador é teleportado para uma posição rotacionada 90° no sentido horário ao redor do centro do mapa; ao pisar em um SCALE_TOGGLE, o atributo size do jogador alterna entre 1 e 2, modificando sua área de ocupação. O número de movimentos é limitado por movements_left, e o jogador pode reiniciar a fase (R) ou avançar para a próxima ao vencer apertando N ou esperando um timer de 2 segundos.
 
-## 1. Descrição do Jogo
+2. Sistema de Referência do Universo (SRU)
+O mundo é representado por uma instância de Grid, cujos atributos width e height armazenam, respectivamente, o número de linhas e de colunas da grade. A célula superior esquerda tem índice (0, 0): o eixo de linhas cresce para baixo e o de colunas, para a direita. Cada célula corresponde a um quadrado de cell_size = 50 pixels. A conversão para coordenadas de tela é direta: x = col * cell_size, y = row * cell_size. Essa correspondência é estabelecida pela projeção ortográfica configurada em reshape_window via glOrtho(0, width, height, 0, ...), com origem no canto superior esquerdo e Y crescendo para baixo.
 
-O jogo implementado é inspirado no clássico **Sokoban**, um quebra-cabeça de lógica onde o agente (jogador) deve empurrar caixas até as células-meta dentro de um mapa em grade. A dinâmica pedagógica está nas células especiais **Rotate Pad** e **Scale Toggle**, que introduzem transformações geométricas como mecânica de jogo: ao pisar em um Rotate Pad, o jogador tem sua posição rotacionada 90° em torno do centro do mapa; ao pisar em um Scale Toggle, a escala do agente seria alterada.
+3. Modelagem dos objetos e seus SROs
+Cada objeto é desenhado com primitivas OpenGL (GL_QUADS, GL_TRIANGLES, GL_TRIANGLE_STRIP) a partir de vértices definidos explicitamente.
 
-O jogo foi implementado com **PyOpenGL** (biblioteca GLUT + GL), projeção ortográfica 2D e entrada via teclado (teclas WASD).
+3.1. Player (Slime) 
+O slime é definido com origem no canto superior esquerdo da sua célula de ancoragem. O tamanho total é size = scale * cell_size, onde scale é o atributo size do objeto Player, 1 ou 2. O corpo é um retângulo verde (GL_QUADS) que preenche toda a área do SRO. Dois olhos pretos quadrados são posicionados simetricamente: o esquerdo centrado em (0.2·size, 0.6·size) e o direito em (0.8·size, 0.6·size), cada um com lado 0.1 * size. O mapeamento para o SRU é feito transladando o SRO para (col * cell_size, row * cell_size), onde (row, col) é obtido de player.position.x e player.position.y. Quando size = 2, o retângulo cobre quatro células.
 
----
+3.2. Box (Caixa) 
+A caixa é modelada com origem no canto superior esquerdo da célula. O corpo principal é um retângulo laranja-marrom com margem de 0.02 * cell_size em todos os lados, definindo os limites left, right, top e bottom. Quatro bordas escuras (border = 0.1 * (cell_size - 2*margin)) são desenhadas nas extremidades internas. Três listras verticais escuras são distribuídas nos offsets 25%, 50% e 75% da largura interna, com espessura stripe = 0.1 * (cell_size - 2*margin). O mapeamento é feito por translação simples para (col * cell_size, row * cell_size)
+.
+3.3. Goal (Objetivo) 
+O goal é composto por dois elementos. Primeiro, um fundo vermelho escuro é desenhado diretamente em draw_scene com glRectf. Em seguida, draw_goal desenha um quadrado vermelho vivo com recuo de pad = 0.1 * cell_size em cada lado, usando glRectf. O mapeamento é por translação para a célula correspondente.
 
-## 2. Modelagem dos Objetos
+3.4. Wall (Parede) - draw_wall(row, col)
+A parede é formada por um retângulo de base cinza claro e linhas de argamassa cinza escuro. A espessura da argamassa é mt = max(2.0, 0.07 * cell_size). São desenhadas: uma linha de argamassa no topo da célula, uma linha horizontal central em mid_y = y + cell_size / 2.0, uma junta vertical a 50% da largura na metade superior, e duas juntas a 25% e 75% na metade inferior, formando o padrão de tijolos alternados. O mapeamento é por translação simples.
 
-O mundo do jogo é representado por uma **grade 2D** (matriz inteira) carregada de um arquivo `map.json`. Cada célula armazena um código inteiro:
+3.5. Scale Pad 
+O piso de escala exibe dois quadrados concêntricos. O externo (azul escuro) preenche toda a célula. O interno (azul claro) tem margem de 0.25 * cell_size em cada lado, calculada pelas variáveis left, right, top e bottom. Ambos são desenhados com GL_QUADS. O mapeamento é por translação para (col * cell_size, row * cell_size).
 
-| Código | Tipo de célula     |
-|--------|--------------------|
-| 0      | Vazio (Empty)      |
-| 1      | Parede (Wall)      |
-| 2      | Meta (Goal)        |
-| 3      | Scale Toggle       |
-| 4      | Rotate Pad         |
+3.6. Rotate Pad 
+O piso de rotação é desenhado com centro em (cx, cy) = (col * cell_size + cell_size/2, row * cell_size + cell_size/2). O arco ciano de 270° é gerado com GL_TRIANGLE_STRIP entre o raio externo r_outer = 0.38 * cell_size e o interno r_inner = 0.22 * cell_size, de angle_start = 120° até angle_end = 390°, com 40 segmentos. A seta é um triângulo (GL_TRIANGLES) calculado na extremidade do arco a partir do vetor tangente (tx, ty) e do vetor radial normal (nx, ny), com comprimento tip_len = 0.17 * cell_size e meia-largura half_w = (r_outer - r_inner) * 0.95.
 
-Além da grade estática, os seguintes objetos dinâmicos existem em tempo de execução:
-
-| Objeto        | Visual                              | Descrição                                                  |
-|---------------|-------------------------------------|------------------------------------------------------------|
-| Agente        | Quadrado verde com dois olhos pretos | Controlado pelo jogador via WASD                          |
-| Caixa         | Quadrado laranja com bordas e listras verticais em marrom escuro | Empurrada pelo agente na mesma direção do movimento |
-| Meta          | Quadrado vermelho vivo com fundo vermelho escuro | Célula estática; indica onde a caixa deve ser colocada |
-| Parede        | Textura de tijolos cinza com linhas de argamassa escura e juntas alternadas | Obstáculo intransponível |
-| Scale Toggle  | Quadrado azul sólido (0.0, 0.0, 1.0) | Célula especial de escala (definida, não implementada)  |
-| Rotate Pad    | Arco ciano de 270° com seta triangular na ponta, sobre fundo ciano escuro | Rotaciona a posição do agente 90° no sentido horário |
-
-Cada objeto dinâmico (agente e caixas) possui uma posição `(row, col)` em coordenadas de grade.
-
----
-
-## 3. Renderização dos Objetos
-
-Cada tipo de célula possui uma função de desenho dedicada, todas operando em coordenadas de pixel (pixel = unidade de mundo na projeção ortográfica).
-
-### 3.1 Agente (`draw_player`)
-
-Desenhado com `GL_QUADS`. O corpo é um quadrado verde `(0.2, 0.9, 0.2)` preenchendo a célula. Dois olhos pretos quadrados são posicionados a 20% e 80% da largura, a 60% da altura, com tamanho de 10% do `cell_size`.
-
-### 3.2 Caixa (`draw_box`)
-
-Desenhado com `GL_QUADS`. Corpo laranja `(0.8, 0.5, 0.0)`. Sobre ele são desenhadas quatro bordas em marrom escuro `(0.6, 0.35, 0.0)` (10% de espessura) e três listras verticais centralizadas em 25%, 50% e 75% da largura, simulando as tábuas de um caixote.
-
-### 3.3 Meta (`draw_goal`)
-
-Desenhado com `glRectf`. Um quadrado vermelho vivo `(1.0, 0.12, 0.12)` com 10% de recuo em relação às bordas da célula, sobre um fundo vermelho escuro `(0.18, 0.0, 0.0)` que preenche a célula inteira. O recuo visual indica o espaço reservado para a caixa.
-
-### 3.4 Rotate Pad (`draw_rotate_pad`)
-
-Desenhado em duas etapas sobre fundo ciano escuro `(0.0, 0.13, 0.15)`:
-
-1. **Arco** (`GL_TRIANGLE_STRIP`): banda circular de 270° (de 120° a 390°) entre raio interno (22% do `cell_size`) e externo (38%). Cor ciano `(0.0, 0.85, 0.95)`. Com Y apontando para baixo, ângulo crescente equivale a sentido horário na tela.
-2. **Seta** (`GL_TRIANGLES`): triângulo posicionado na extremidade do arco (ângulo 390° = 30°). A ponta aponta na direção tangente `(-sin θ, cos θ)` e a base se estende na direção radial `(cos θ, sin θ)`, indicando claramente a rotação horária.
-
-### 3.5 Parede (`draw_wall`)
-
-Desenhado com `GL_QUADS` e `glRectf`. Base cinza `(0.55, 0.55, 0.55)`. Sobre ela são aplicadas linhas de argamassa cinza escuro `(0.3, 0.3, 0.3)` com espessura de 7% do `cell_size`:
-
-- Linha horizontal no topo da célula (sempre visível).
-- Linha horizontal na metade da célula, dividindo-a em duas fiadas de tijolos.
-- Junta vertical em 50% na fiada superior.
-- Juntas verticais em 25% e 75% na fiada inferior (alternadas), criando o padrão clássico de tijolos.
-
----
-
-## 4. SRO – Sistema de Referência do Objeto
-
-### 4.1 Sistema de Referência Global (tela)
-
-A projeção utilizada é **ortográfica 2D** configurada via `glOrtho`:
-
-```
-glOrtho(0, largura_janela, altura_janela, 0, -1, 1)
-```
-
-- Origem em **pixel (0, 0) = canto superior esquerdo** da janela.
-- Eixo **X** cresce para a direita (colunas da grade).
-- Eixo **Y** cresce para baixo (linhas da grade).
-- Unidade: 1 unidade de mundo = 1 pixel.
-
-O tamanho da janela é ajustado automaticamente para `num_colunas × cell_size` por `num_linhas × cell_size` pixels (cell_size = 50 px).
-
----
-
-### 4.2 SRO da Grade (Grid)
-
-A grade é o objeto base. Seu SRO coincide com o sistema global:
-
-- Célula `(row, col)` ocupa o retângulo de pixels:
-  - `x_min = col × cell_size`
-  - `y_min = row × cell_size`
-  - `x_max = (col + 1) × cell_size`
-  - `y_max = (row + 1) × cell_size`
-
-A célula `(0, 0)` fica no canto **superior esquerdo** da janela.
-
----
-
-### 4.3 SRO do Agente (Player)
-
-- Representado como um quadrado de `cell_size × cell_size` pixels.
-- Posição lógica armazenada em coordenadas de grade: `(player.x, player.y)` onde `x = row`, `y = col`.
-- Posição no espaço de tela:
-  - `x_pixel = player.y × cell_size` (coluna → espaço horizontal)
-  - `y_pixel = player.x × cell_size` (linha → espaço vertical)
-- **Origem local** do objeto: canto superior esquerdo da célula que ele ocupa.
-
----
-
-### 4.4 SRO da Caixa (Box)
-
-- Mesmo sistema do agente: posição lógica `(box.x, box.y)` em coordenadas de grade.
-- Mapeamento para pixels idêntico ao do agente.
-- **Origem local**: canto superior esquerdo da célula ocupada.
-
----
-
-### 4.5 SRO das Células Especiais (Rotate Pad / Scale Toggle)
-
-- São células estáticas da grade; seu SRO é o mesmo da grade.
-- Não possuem estado próprio, apenas alteram o estado do agente ao contato.
-
----
-
-## 5. Transformações Geométricas Implementadas
-
-### 5.1 Translação
-
-O agente se move pressionando **W / A / S / D**. Cada tecla aplica um delta `(dx, dy)` à posição em grade:
-
-| Tecla | dx (linha) | dy (coluna) | Direção visual |
-|-------|------------|-------------|----------------|
-| W     | -1         | 0           | Cima           |
-| S     | +1         | 0           | Baixo          |
-| A     | 0          | -1          | Esquerda       |
-| D     | 0          | +1          | Direita        |
-
-A translação verifica colisão com paredes e limites do mapa antes de ser aplicada. Se uma caixa está no caminho, verifica se a célula além dela está livre; em caso afirmativo, a caixa também é transladada (empurrada).
-
-Em coordenadas de tela, a nova posição em pixels é simplesmente `nova_posição_grade × cell_size`.
-
-### 5.2 Rotação
-
-Ao pisar em um **Rotate Pad** (célula cyan), a posição do agente é rotacionada **90° no sentido horário** em torno do **centro geométrico** da grade.
-
-Fórmula aplicada (rotação 2D discreta sobre grade):
-
-```
-center_row = (num_rows - 1) / 2
-center_col = (num_cols - 1) / 2
-
-new_row = center_row + (old_col - center_col)
-new_col = center_col - (old_row - center_row)
-```
-
-Esta operação é equivalente à rotação matricial:
-
-```
-[new_row]   [ 0   1 ] [old_row - center_row]   [center_row]
-[new_col] = [-1   0 ] [old_col - center_col] + [center_col]
-```
-
-A rotação é bloqueada caso a célula destino seja uma parede ou limite do mapa. O flag `just_rotated` evita aplicações múltiplas enquanto o agente permanece sobre o pad.
-
-### 5.3 Escala (Scale Toggle)
-
-A célula **Scale Toggle** (azul) está definida no código e mapeada no sistema de células, mas a transformação de escala ainda não foi implementada (marcada com `pass`). A estrutura está preparada para aplicar uma mudança de escala visual ao agente ao pisar nessa célula.
-
----
-
-## 6. Controles
-
-| Tecla | Ação                              |
-|-------|-----------------------------------|
-| W     | Mover agente para cima            |
-| S     | Mover agente para baixo           |
-| A     | Mover agente para a esquerda      |
-| D     | Mover agente para a direita       |
-
-Não há suporte a mouse nesta versão.
-
----
-
-## 7. Objetivo e Condição de Vitória
-
-O agente deve empurrar **todas as caixas** (laranja) sobre as **células-meta** (vermelho). Quando isso ocorre, a função `check_victory()` detecta que todas as caixas estão sobre metas (`BOX_ON_GOAL`) e exibe a mensagem **"Fase completa!"** no título da janela, desabilitando a entrada de teclado.
-
-O jogo também registra um contador de movimentos restantes (`movements_left`), iniciado em 10.
-
----
-
-## 8. Estrutura do Projeto
-
-```
-src/
-  game/
-    main.py                   # Código principal (OpenGL, lógica, callbacks)
-    phases/
-      001/
-        map.json              # Mapa da fase 1: grade 7×7 com parede, meta, rotate pad e scale toggle
-```
-
-O mapa da fase 1 é uma grade 7×7 com borda de paredes, uma caixa em `(3,3)`, agente em `(1,1)`, meta em `(2,5)`, Rotate Pad em `(2,3)` e Scale Toggle em `(5,2)`.
-
----
-
-## 9. Tecnologias Utilizadas
-
-- **Python 3**
-- **PyOpenGL** (OpenGL + GLUT) – renderização e janela
-- **JSON** – definição dos mapas de fase
+4. Transformações geométricas controladas pelo usuário
+O movimento do jogador via WASD é mapeado em MOVE_DELTAS para deltas (dx, dy) aplicados a player.position.x e player.position.y. A lógica de colisão e empurre de caixas é centralizada em try_step, com try_move_giant tratando o caso size = 2. A escala é aplicada diretamente na geometria de draw_player: o parâmetro scale multiplica cell_size, expandindo o retângulo para cobrir quatro células sem alterar a matriz de projeção. A rotação de posição é calculada em apply_rotation, reposicionando o jogador via nova atribuição a player.position.x e player.position.y, com a flag just_rotated evitando ativações repetidas.
