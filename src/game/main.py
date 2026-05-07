@@ -10,11 +10,15 @@ from OpenGL.GL import (
     GL_DEPTH_BUFFER_BIT,
     GL_MODELVIEW,
     GL_PROJECTION,
+    GL_QUADS,
+    glBegin,
     glClear,
     glClearColor,
+    glEnd,
     glLoadIdentity,
     glMatrixMode,
     glOrtho,
+    glVertex2f,
     glViewport,
     glColor3f,
     glRectf,
@@ -223,6 +227,109 @@ def draw_cell(row: int, col: int, cell_type: Cell) -> None:
         (row + 1) * cell_size,
     )
 
+def draw_player(row, col, scale = 1):
+    """Helper function to draw the player as a green rectangle with two black square eyes (a slime)"""
+    
+    # Top left corner of the cell
+    x = col * cell_size
+    y = row * cell_size
+
+    # Height/Width of the player rectangle
+    size = scale * cell_size
+
+    # Draw the player body as a green rectangle
+    glColor3f(0.2, 0.9, 0.2)
+    glBegin(GL_QUADS)
+    glVertex2f(x, y)
+    glVertex2f(x + size, y)
+    glVertex2f(x + size, y + size)
+    glVertex2f(x, y + size)
+    glEnd()
+
+    # Size of the eyes as a fraction of the player size
+    eye_size = 0.1 * size
+
+    # Left eye
+    glColor3f(0, 0, 0)
+    glBegin(GL_QUADS)
+    glVertex2f(x + 0.2*size - eye_size/2, y + 0.6*size - eye_size/2)
+    glVertex2f(x + 0.2*size + eye_size/2, y + 0.6*size - eye_size/2)
+    glVertex2f(x + 0.2*size + eye_size/2, y + 0.6*size + eye_size/2)
+    glVertex2f(x + 0.2*size - eye_size/2, y + 0.6*size + eye_size/2)
+    glEnd()
+    # Right eye
+    glBegin(GL_QUADS)
+    glVertex2f(x + 0.8*size - eye_size/2, y + 0.6*size - eye_size/2)
+    glVertex2f(x + 0.8*size + eye_size/2, y + 0.6*size - eye_size/2)
+    glVertex2f(x + 0.8*size + eye_size/2, y + 0.6*size + eye_size/2)
+    glVertex2f(x + 0.8*size - eye_size/2, y + 0.6*size + eye_size/2)
+    glEnd()
+
+def draw_box(row, col):
+    """Helper function to draw a box as a brown crate with darker border stripes."""
+    # Top-left corner of the cell
+    x = col * cell_size
+    y = row * cell_size
+
+    # Main box body
+    glColor3f(0.8, 0.5, 0.0)
+    glBegin(GL_QUADS)
+    glVertex2f(x, y)
+    glVertex2f(x + cell_size, y)
+    glVertex2f(x + cell_size, y + cell_size)
+    glVertex2f(x, y + cell_size)
+    glEnd()
+
+    # Dark brown border stripes
+    glColor3f(0.6, 0.35, 0.0)
+    border = 0.1 * cell_size
+    # Top border
+    glBegin(GL_QUADS)
+    glVertex2f(x, y)
+    glVertex2f(x + cell_size, y)
+    glVertex2f(x + cell_size, y + border)
+    glVertex2f(x, y + border)
+    glEnd()
+    # Bottom border
+    glBegin(GL_QUADS)
+    glVertex2f(x, y + cell_size - border)
+    glVertex2f(x + cell_size, y + cell_size - border)
+    glVertex2f(x + cell_size, y + cell_size)
+    glVertex2f(x, y + cell_size)
+    glEnd()
+    # Left border
+    glBegin(GL_QUADS)
+    glVertex2f(x, y)
+    glVertex2f(x + border, y)
+    glVertex2f(x + border, y + cell_size)
+    glVertex2f(x, y + cell_size)
+    glEnd()
+    # Right border
+    glBegin(GL_QUADS)
+    glVertex2f(x + cell_size - border, y)
+    glVertex2f(x + cell_size, y)
+    glVertex2f(x + cell_size, y + cell_size)
+    glVertex2f(x + cell_size - border, y + cell_size)
+    glEnd()
+
+    # Stripes on the box
+    stripe = 0.1 * cell_size
+    # Positions as fraction of cell width
+    offsets = [0.25, 0.5, 0.75] 
+    for off in offsets:
+        # x for the centre of the stripe
+        stripe_x = x + off * cell_size
+        # Left and right edges of the stripe
+        left = stripe_x - stripe / 2
+        right = stripe_x + stripe / 2
+
+        glBegin(GL_QUADS)
+        glVertex2f(left, y)
+        glVertex2f(right, y)
+        glVertex2f(right, y + cell_size)
+        glVertex2f(left, y + cell_size)
+        glEnd()
+
 def get_box_at(x, y):
     """Helper function to check if there is a box at the given coordinates and return it."""
     for box in phase["boxes"]:
@@ -285,13 +392,13 @@ def draw_scene() -> None:
     
     # Draw the player on top of the grid.
     player_pos = phase["player"].get_position()
-    draw_cell(player_pos.x, player_pos.y, Cell.PLAYER)
+    draw_player(player_pos.x, player_pos.y)
 
     # Draw the boxes on top of the grid.
     for box in phase["boxes"]:
         box_pos = box.get_position()
         # Draw the box with the appropriate color based on its position.
-        draw_cell(box_pos.x, box_pos.y, cell_at(box_pos.x, box_pos.y))
+        draw_box(box_pos.x, box_pos.y)
 
     glutSwapBuffers()
 
