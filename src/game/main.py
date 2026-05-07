@@ -566,8 +566,11 @@ def draw_scene() -> None:
                 glRectf(col * cell_size, row * cell_size, (col + 1) * cell_size, (row + 1) * cell_size)
                 draw_goal(row, col)
             elif cell_type == Cell.ROTATE_PAD:
-                glColor3f(0.0, 0.13, 0.15)
+                border = cell_size * 0.07
+                glColor3f(0.0, 0.85, 0.95)
                 glRectf(col * cell_size, row * cell_size, (col + 1) * cell_size, (row + 1) * cell_size)
+                glColor3f(0.0, 0.13, 0.15)
+                glRectf(col * cell_size + border, row * cell_size + border, (col + 1) * cell_size - border, (row + 1) * cell_size - border)
                 draw_rotate_pad(row, col)
             elif cell_type == Cell.SCALE_TOGGLE:
                 glColor3f(0.0, 0.0, 0.13)
