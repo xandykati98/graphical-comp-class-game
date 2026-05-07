@@ -76,14 +76,29 @@ class Player:
         self.position = position
         # Flag to prevent multiple rotations from a single step
         self.just_rotated = False
+        self.size = 1
         print("Player initialized at position:", self.position.x, self.position.y)
 
     def get_position(self) -> Position:
+        """Returns the current position of the player."""
         return self.position
     
     def move(self, dx: int, dy: int) -> None:
+        """Moves the player by (dx, dy) if the destination cell is walkable."""
         self.position.x += dx
         self.position.y += dy
+
+    def get_cells(self) -> list[tuple[int, int]]:
+        """Return a list of (row, col) cells currently occupied by the player."""
+        cells = []
+        top_left_row = self.position.x
+        top_left_col = self.position.y
+        for row_offset in range(self.size):
+            for col_offset in range(self.size):
+                cell_row = top_left_row + row_offset
+                cell_col = top_left_col + col_offset
+                cells.append((cell_row, cell_col))
+        return cells
     
 class Box:
     def __init__(self, position: Position):
@@ -227,7 +242,7 @@ def draw_cell(row: int, col: int, cell_type: Cell) -> None:
         (row + 1) * cell_size,
     )
 
-def draw_player(row, col, scale = 1):
+def draw_player(row, col, scale):
     """Helper function to draw the player as a green rectangle with two black square eyes (a slime)"""
     
     # Top left corner of the cell
@@ -266,68 +281,76 @@ def draw_player(row, col, scale = 1):
     glEnd()
 
 def draw_box(row, col):
-    """Helper function to draw a box as a brown crate with darker border stripes."""
+    """Helper function to draw a box as a brown crate."""
     # Top-left corner of the cell
     x = col * cell_size
     y = row * cell_size
 
-    # Main box body
+    # margin to make the box smaller (in pixels)
+    margin = 0.02 * cell_size  
+
+    # Calculate the bounds of the inner box
+    left = x + margin
+    right = x + cell_size - margin
+    top = y + margin
+    bottom = y + cell_size - margin
+
+    # Main box body (fills the inner area)
     glColor3f(0.8, 0.5, 0.0)
     glBegin(GL_QUADS)
-    glVertex2f(x, y)
-    glVertex2f(x + cell_size, y)
-    glVertex2f(x + cell_size, y + cell_size)
-    glVertex2f(x, y + cell_size)
+    glVertex2f(left, top)
+    glVertex2f(right, top)
+    glVertex2f(right, bottom)
+    glVertex2f(left, bottom)
     glEnd()
 
-    # Dark brown border stripes
+    # Box border
     glColor3f(0.6, 0.35, 0.0)
-    border = 0.1 * cell_size
+    border = 0.1 * (cell_size - 2*margin)  
     # Top border
     glBegin(GL_QUADS)
-    glVertex2f(x, y)
-    glVertex2f(x + cell_size, y)
-    glVertex2f(x + cell_size, y + border)
-    glVertex2f(x, y + border)
+    glVertex2f(left, top)
+    glVertex2f(right, top)
+    glVertex2f(right, top + border)
+    glVertex2f(left, top + border)
     glEnd()
     # Bottom border
     glBegin(GL_QUADS)
-    glVertex2f(x, y + cell_size - border)
-    glVertex2f(x + cell_size, y + cell_size - border)
-    glVertex2f(x + cell_size, y + cell_size)
-    glVertex2f(x, y + cell_size)
+    glVertex2f(left, bottom - border)
+    glVertex2f(right, bottom - border)
+    glVertex2f(right, bottom)
+    glVertex2f(left, bottom)
     glEnd()
     # Left border
     glBegin(GL_QUADS)
-    glVertex2f(x, y)
-    glVertex2f(x + border, y)
-    glVertex2f(x + border, y + cell_size)
-    glVertex2f(x, y + cell_size)
+    glVertex2f(left, top)
+    glVertex2f(left + border, top)
+    glVertex2f(left + border, bottom)
+    glVertex2f(left, bottom)
     glEnd()
     # Right border
     glBegin(GL_QUADS)
-    glVertex2f(x + cell_size - border, y)
-    glVertex2f(x + cell_size, y)
-    glVertex2f(x + cell_size, y + cell_size)
-    glVertex2f(x + cell_size - border, y + cell_size)
+    glVertex2f(right - border, top)
+    glVertex2f(right, top)
+    glVertex2f(right, bottom)
+    glVertex2f(right - border, bottom)
     glEnd()
 
-    # Stripes on the box
-    stripe = 0.1 * cell_size
-    # Positions as fraction of cell width
-    offsets = [0.25, 0.5, 0.75] 
+    # Vertical stripes
+    stripe = 0.1 * (cell_size - 2*margin)   
+    offsets = [0.25, 0.5, 0.75]            
     for off in offsets:
         # x for the centre of the stripe
-        stripe_x = x + off * cell_size
+        stripe_x = left + off * (right - left)
         # Left and right edges of the stripe
-        left = stripe_x - stripe / 2
-        right = stripe_x + stripe / 2
+        stripe_left = stripe_x - stripe / 2
+        stripe_right = stripe_x + stripe / 2
 
         glBegin(GL_QUADS)
-        glVertex2f(left, y)
-        glVertex2f(right, y)
-        glVertex2f(right, y + cell_size)
-        glVertex2f(left, y + cell_size)
+        glVertex2f(stripe_left, top + border)
+        glVertex2f(stripe_right, top + border)
+        glVertex2f(stripe_right, bottom - border)
+        glVertex2f(stripe_left, bottom - border)
         glEnd()
 
 def get_box_at(x, y):
@@ -392,7 +415,7 @@ def draw_scene() -> None:
     
     # Draw the player on top of the grid.
     player_pos = phase["player"].get_position()
-    draw_player(player_pos.x, player_pos.y)
+    draw_player(player_pos.x, player_pos.y, phase["player"].size)
 
     # Draw the boxes on top of the grid.
     for box in phase["boxes"]:
@@ -437,19 +460,104 @@ def apply_rotation():
     else:
         print("Teleport out of bounds.")
 
+def can_place_giant(dx: int, dy: int) -> bool:
+    """Return True if a 2x2 footprint starting at (dx, dy) is entirely inside the grid and contains only walkable, box‑free cells."""
+    for row_offset in range(2):
+        for col_offset in range(2):
+            cell_x = dx + row_offset
+            cell_y = dy + col_offset
+            # Bounds check
+            if not (0 <= cell_x < phase["grid"].width and 0 <= cell_y < phase["grid"].height):
+                return False
+            # Must be walkable terrain and no box present
+            terrain = get_grid_type(phase["grid"].grid[cell_x][cell_y])
+            if not is_walkable(terrain) or get_box_at(cell_x, cell_y) is not None:
+                return False
+    return True
+
 def apply_cell_effects(cell_type: Cell, player: Player) -> None:
     """Apply effects associated with the cell type to the player."""
     if cell_type == Cell.SCALE_TOGGLE or cell_type == Cell.BOX_ON_SCALE_TOGGLE:
-        pass
+        if player.size == 1:
+            position_valid = False
+            search_x = player.position.x
+            while search_x >= 0:
+                if can_place_giant(search_x, player.position.y):
+                    player.position.x = search_x
+                    player.size = 2
+                    position_valid = True
+                    break
+                search_x -= 1
+            if not position_valid:
+                print("Problem finding space for giant player.")
+
+            
+            player.size = 2
+            print("Player size is now 2.")
+        else:
+            player.size = 1
     elif cell_type == Cell.ROTATE_PAD or cell_type == Cell.BOX_ON_ROTATE_PAD:
         if not player.just_rotated:
             apply_rotation()
+
+def try_move_giant(dx, dy, player: Player) -> bool:
+    """Attempt to move a giant player (size > 1) by (dx, dy). Returns True if the move was successful, False otherwise."""
+    new_x = player.position.x + dx
+    new_y = player.position.y + dy
+
+    old_cells = player.get_cells()
+
+    # Generate the list of cells that the giant player would occupy after the move.
+    new_cells = []
+    for row_offset in range(player.size):
+        for col_offset in range(player.size):
+            cell_x = new_x + row_offset
+            cell_y = new_y + col_offset
+            new_cells.append((cell_x, cell_y))
+
+    for cell_x, cell_y in new_cells:
+        # Check bounds first to avoid index errors in cell_at and get_box_at.
+        if cell_x < 0 or cell_x >= phase["grid"].width or cell_y < 0 or cell_y >= phase["grid"].height:
+            return False
+        
+        if (cell_x, cell_y) in old_cells:
+            continue
+        if not is_walkable(cell_at(cell_x, cell_y)):
+            return False
+
+    player.position.x = new_x
+    player.position.y = new_y
+
+    found_scale = False
+    found_rotate = False
+
+    for cell_x, cell_y in new_cells:
+        if (cell_x, cell_y) in old_cells:
+            continue
+
+        cell_value = phase["grid"].grid[cell_x][cell_y]
+        cell_type = get_grid_type(cell_value)
+
+        if cell_type == Cell.SCALE_TOGGLE:
+            found_scale = True
+        elif cell_type == Cell.ROTATE_PAD:
+            found_rotate = True
+
+    if found_scale:
+        apply_cell_effects(Cell.SCALE_TOGGLE, player)
+    if found_rotate:
+        apply_cell_effects(Cell.ROTATE_PAD, player)
+
+    return True
 
 def try_step(dx: int, dy: int) -> bool:
     """Attempt to move the player by (dx, dy). Returns True if the move was successful, False otherwise."""
     player = phase["player"]
     new_x = player.position.x + dx
     new_y = player.position.y + dy
+
+    if player.size > 1:
+        return try_move_giant(dx, dy, player)
 
     target = cell_at(new_x, new_y)
 
