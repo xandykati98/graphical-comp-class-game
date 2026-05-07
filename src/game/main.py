@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import math
 from typing import Final
@@ -53,7 +54,8 @@ WINDOW_H: Final[int] = 700
 
 # Pixels per map cell; window size becomes num_cols * cell_size by num_rows * cell_size.
 cell_size = 50
-
+current_phase = 1
+is_new_phase = True
 
 class Grid:
     """
@@ -112,7 +114,7 @@ class Box:
     def get_position(self) -> Position:
         return self.position
 
-def load_map_data(phase_number: int) -> tuple[Grid, list[int], list[list[int]]]:
+def load_map_data(phase_number: int) -> tuple[Grid, list[int], list[list[int]], int]:
     """
     Read src/game/phases/{phase}/map.json and return the grid plus spawn metadata.
 
@@ -124,20 +126,22 @@ def load_map_data(phase_number: int) -> tuple[Grid, list[int], list[list[int]]]:
     matrix = map_data["map"]
     agent_start_position = map_data["agent_start_position"]
     boxes_start_positions = map_data["boxes_start_positions"]
+    movements_limit = map_data.get("movements_limit", 10) # Default 10 if not specified
     # Grid(len(matrix), len(matrix[0])) => width = row count, height = col count.
     grid_object = Grid(len(matrix), len(matrix[0]))
     grid_object.grid = matrix
-    return grid_object, agent_start_position, boxes_start_positions
+    return grid_object, agent_start_position, boxes_start_positions, movements_limit
 
 
-def build_phase(phase_number: int) -> tuple[Grid, Player, list[Box]]:
+def build_phase(phase_number: int) -> tuple[Grid, Player, list[Box], int]:
     """
     Returns:
       grid:   The Grid object.
       player: A Player instance placed at the start position.
       boxes:  A list of Box instances placed at their start positions.
+      movements_limit: The maximum number of movements allowed.
     """
-    grid_object, agent_start_position, boxes_start_positions = load_map_data(phase_number)
+    grid_object, agent_start_position, boxes_start_positions, limit = load_map_data(phase_number)
 
     player = Player(Position(agent_start_position[0], agent_start_position[1]))
     
@@ -146,21 +150,35 @@ def build_phase(phase_number: int) -> tuple[Grid, Player, list[Box]]:
         box = Box(Position(box_pos[0], box_pos[1]))
         boxes.append(box)
 
-    return grid_object, player, boxes
+    return grid_object, player, boxes, limit
     
-        
+def update_window_title():
+    """Update the window title according to the current game state and moves."""
+    state = phase["state"]
+    if state == "playing":
+        msg = f"{phase['movements_left']} Movimentos faltando!"
+        glutSetWindowTitle(msg.encode())
+    elif state == "won":
+        next_num = current_phase + 1
+        next_file = f"src/game/phases/{next_num:03d}/map.json"
+        if os.path.isfile(next_file):
+            glutSetWindowTitle(b"Aperte N para ir para a proxima fase!")
+        else:
+            glutSetWindowTitle(b"Voce ganhou! Parabens!")
+    elif state == "lost":
+        glutSetWindowTitle(b"Aperte R para reiniciar a fase!")
 
 
-# First time draw_grid runs we snap the window to the map pixel size; then clear this flag.
-is_new_phase = True
 
-grid_object, player, boxes = build_phase(1)
+grid_object, player, boxes, movements_limit = build_phase(current_phase)
 # Mutable dict so later code can swap phases without replacing the global name.
 phase = {}
 phase["grid"] = grid_object
 phase["player"] = player
 phase["boxes"] = boxes
-phase["movements_left"] = 10
+phase["movements_left"] = movements_limit
+phase["movements_limit"] = movements_limit
+phase["state"] = "playing"  # or "won", "lost"
 
 
 def reshape_window(width: int, height: int) -> None:
@@ -417,6 +435,36 @@ def draw_rotate_pad(row: int, col: int) -> None:
     glVertex2f(b2_x, b2_y)
     glEnd()
 
+def draw_scale_pad(row: int, col: int) -> None:
+    """Draw a scale toggle pad as two nested blue squares (outer dark, inner light)."""
+    # Top-left corner of the cell in pixels
+    x = col * cell_size
+    y = row * cell_size
+
+    # Outer square
+    glColor3f(0.0, 0.0, 0.8)
+    glBegin(GL_QUADS)
+    glVertex2f(x, y)
+    glVertex2f(x + cell_size, y)
+    glVertex2f(x + cell_size, y + cell_size)
+    glVertex2f(x, y + cell_size)
+    glEnd()
+
+    # Inner square
+    margin = 0.25 * cell_size
+    left   = x + margin
+    right  = x + cell_size - margin
+    top    = y + margin
+    bottom = y + cell_size - margin
+
+    glColor3f(0.5, 0.5, 1.0)
+    glBegin(GL_QUADS)
+    glVertex2f(left, top)
+    glVertex2f(right, top)
+    glVertex2f(right, bottom)
+    glVertex2f(left, bottom)
+    glEnd()
+
 def draw_wall(row: int, col: int) -> None:
     """Draw a wall cell as a brick pattern with horizontal rows and staggered vertical joints."""
     x = col * cell_size
@@ -519,6 +567,10 @@ def draw_scene() -> None:
                 glColor3f(0.0, 0.13, 0.15)
                 glRectf(col * cell_size, row * cell_size, (col + 1) * cell_size, (row + 1) * cell_size)
                 draw_rotate_pad(row, col)
+            elif cell_type == Cell.SCALE_TOGGLE:
+                glColor3f(0.0, 0.0, 0.13)
+                glRectf(col * cell_size, row * cell_size, (col + 1) * cell_size, (row + 1) * cell_size)
+                draw_scale_pad(row, col)
             else:
                 draw_cell(row, col, cell_type)
     
@@ -534,6 +586,21 @@ def draw_scene() -> None:
 
     glutSwapBuffers()
 
+def restart_phase():
+    """Reload the current phase from scratch, resetting all state."""
+    global phase, is_new_phase
+    grid_object, player, boxes, limit = build_phase(current_phase)
+    phase["grid"] = grid_object
+    phase["player"] = player
+    phase["boxes"] = boxes
+    phase["movements_left"] = limit
+    phase["movements_limit"] = limit
+    phase["state"] = "playing"
+    is_new_phase = True
+    update_window_title()
+    # Re-enable keyboard in case it was disabled
+    glutKeyboardFunc(handle_keypress)
+
 MOVE_DELTAS = {
     'w': (-1, 0),  
     's': (1, 0),   
@@ -542,12 +609,33 @@ MOVE_DELTAS = {
 }
 
 def handle_keypress(key, x: int, y: int) -> None:
-    """Keyboard callback: move player with WASD using the move method, then redraw."""
+    """Dispatch keyboard input based on current game state."""
     key = key.decode().lower()
-    if key in MOVE_DELTAS:
-        dx, dy = MOVE_DELTAS[key]
-        handle_movement(dx, dy)
-    glutPostRedisplay()
+    global current_phase
+
+    # Restart works in every state
+    if key == 'r':
+        restart_phase()
+        glutPostRedisplay()
+        return
+
+    state = phase.get("state", "playing")
+
+    if state == "playing":
+        if key in MOVE_DELTAS and phase["movements_left"] > 0:
+            dx, dy = MOVE_DELTAS[key]
+            handle_movement(dx, dy)
+            glutPostRedisplay()
+
+    elif state == "won":
+        if key == 'n':
+            next_num = current_phase + 1
+            next_file = f"src/game/phases/{next_num:03d}/map.json"
+            if os.path.isfile(next_file):
+                current_phase = next_num
+                restart_phase() 
+            # If last phase, 'n' does nothing
+            glutPostRedisplay()
 
 def apply_rotation():
     """Rotate the player's position 90 degrees clockwise around the center of the grid."""
@@ -694,20 +782,24 @@ def try_step(dx: int, dy: int) -> bool:
     return False
 
 def handle_movement(dx, dy):
-    """Handles the logic for moving the player and boxes based on the attempted movement."""
+    """Process one step of movement, update counters and game state."""
     player = phase["player"]
     player.just_rotated = False
 
     if try_step(dx, dy):
         phase["movements_left"] -= 1
-        print(f"Player moved to ({player.position.x}, {player.position.y}). Movements left: {phase['movements_left']}")
+        update_window_title()
+
+        
+        # Check for victory or loss
+        if phase["state"] == "playing" and check_victory():
+            phase["state"] = "won"
+            update_window_title()
+        elif phase["movements_left"] <= 0 and phase["state"] == "playing":
+            phase["state"] = "lost"
+            update_window_title()
+
     
-    if check_victory():
-        """ If every box is on a goal, print "Phase completed!" and update the window title. """
-        print("Fase completa!")
-        glutSetWindowTitle(b"Fase completa!")
-        # Disable further input after victory.
-        glutKeyboardFunc(None)
 
 def check_victory() -> bool:
     """Return True if every box is on a goal."""
@@ -723,6 +815,7 @@ def main() -> None:
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
     glutInitWindowSize(WINDOW_W, WINDOW_H)
     glutCreateWindow(b"Grid: obstacles (gray), agent (red) at (0,0)")
+    update_window_title()
     # Must run after glutCreateWindow: no current GL context exists before then.
     glClearColor(0.0, 0.0, 0.0, 1.0)
     # Establish pixel projection whenever the window size changes.
