@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import math
 from typing import Final
 import json
 from enum import Enum, auto
@@ -11,6 +12,9 @@ from OpenGL.GL import (
     GL_MODELVIEW,
     GL_PROJECTION,
     GL_QUADS,
+    GL_TRIANGLE_FAN,
+    GL_TRIANGLE_STRIP,
+    GL_TRIANGLES,
     glBegin,
     glClear,
     glClearColor,
@@ -353,6 +357,100 @@ def draw_box(row, col):
         glVertex2f(stripe_left, bottom - border)
         glEnd()
 
+def draw_goal(row: int, col: int) -> None:
+    """Draw a goal cell as a red square with a darker red border."""
+    pad = cell_size * 0.1
+    x = col * cell_size + pad
+    y = row * cell_size + pad
+    size = cell_size - 2 * pad
+
+    # Bright red fill
+    glColor3f(1.0, 0.12, 0.12)
+    glRectf(x, y, x + size, y + size)
+
+def draw_rotate_pad(row: int, col: int) -> None:
+    """Draw a rotate pad as a 270-degree arc with a clockwise arrowhead at its tip."""
+    cx = col * cell_size + cell_size / 2.0
+    cy = row * cell_size + cell_size / 2.0
+    r_outer = cell_size * 0.38
+    r_inner = cell_size * 0.22
+    segments = 40
+
+    angle_start = math.radians(120)
+    angle_end = math.radians(390)  # 120 + 270
+
+    glColor3f(0.0, 0.85, 0.95)
+    glBegin(GL_TRIANGLE_STRIP)
+    for i in range(segments + 1):
+        t = i / segments
+        angle = angle_start + t * (angle_end - angle_start)
+        glVertex2f(cx + r_outer * math.cos(angle), cy + r_outer * math.sin(angle))
+        glVertex2f(cx + r_inner * math.cos(angle), cy + r_inner * math.sin(angle))
+    glEnd()
+
+    # Arrowhead at angle_end 
+    r_mid = (r_outer + r_inner) / 2.0
+    base_x = cx + r_mid * math.cos(angle_end)
+    base_y = cy + r_mid * math.sin(angle_end)
+
+    # Tangent direction for increasing angle (clockwise on screen with Y-down)
+    tx = -math.sin(angle_end)
+    ty = math.cos(angle_end)
+
+    # Radial outward normal for the arrowhead width
+    nx = math.cos(angle_end)
+    ny = math.sin(angle_end)
+
+    tip_len = cell_size * 0.17
+    half_w = (r_outer - r_inner) * 0.95
+
+    tip_x = base_x + tx * tip_len
+    tip_y = base_y + ty * tip_len
+    b1_x = base_x + nx * half_w
+    b1_y = base_y + ny * half_w
+    b2_x = base_x - nx * half_w
+    b2_y = base_y - ny * half_w
+
+    glBegin(GL_TRIANGLES)
+    glVertex2f(tip_x, tip_y)
+    glVertex2f(b1_x, b1_y)
+    glVertex2f(b2_x, b2_y)
+    glEnd()
+
+def draw_wall(row: int, col: int) -> None:
+    """Draw a wall cell as a brick pattern with horizontal rows and staggered vertical joints."""
+    x = col * cell_size
+    y = row * cell_size
+    mt = max(2.0, 0.07 * cell_size)  # mortar line thickness
+
+    # Brick base fill (gray)
+    glColor3f(0.55, 0.55, 0.55)
+    glBegin(GL_QUADS)
+    glVertex2f(x, y)
+    glVertex2f(x + cell_size, y)
+    glVertex2f(x + cell_size, y + cell_size)
+    glVertex2f(x, y + cell_size)
+    glEnd()
+
+    # Mortar color for all lines
+    glColor3f(0.3, 0.3, 0.3)
+
+    # Top edge mortar line (always present)
+    glRectf(x, y, x + cell_size, y + mt)
+
+    # Horizontal mortar line splitting the cell into two brick rows
+    mid_y = y + cell_size / 2.0
+    glRectf(x, mid_y - mt / 2.0, x + cell_size, mid_y + mt / 2.0)
+
+    # Top brick row: single vertical joint at 50%
+    jx = x + cell_size * 0.5
+    glRectf(jx - mt / 2.0, y, jx + mt / 2.0, mid_y)
+
+    # Bottom brick row: staggered joints at 25% and 75%
+    for frac in (0.25, 0.75):
+        jx = x + cell_size * frac
+        glRectf(jx - mt / 2.0, mid_y, jx + mt / 2.0, y + cell_size)
+
 def get_box_at(x, y):
     """Helper function to check if there is a box at the given coordinates and return it."""
     for box in phase["boxes"]:
@@ -411,7 +509,18 @@ def draw_scene() -> None:
     for row in range(num_rows):
         for col in range(num_cols):
             cell_type = get_grid_type(grid_matrix[row][col])
-            draw_cell(row, col, cell_type)
+            if cell_type == Cell.WALL:
+                draw_wall(row, col)
+            elif cell_type == Cell.GOAL:
+                glColor3f(0.18, 0.0, 0.0)
+                glRectf(col * cell_size, row * cell_size, (col + 1) * cell_size, (row + 1) * cell_size)
+                draw_goal(row, col)
+            elif cell_type == Cell.ROTATE_PAD:
+                glColor3f(0.0, 0.13, 0.15)
+                glRectf(col * cell_size, row * cell_size, (col + 1) * cell_size, (row + 1) * cell_size)
+                draw_rotate_pad(row, col)
+            else:
+                draw_cell(row, col, cell_type)
     
     # Draw the player on top of the grid.
     player_pos = phase["player"].get_position()
