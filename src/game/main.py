@@ -70,6 +70,8 @@ class Position:
 class Player:
     def __init__(self, position: Position):
         self.position = position
+        # Flag to prevent multiple rotations from a single step
+        self.just_rotated = False
         print("Player initialized at position:", self.position.x, self.position.y)
 
     def get_position(self) -> Position:
@@ -166,6 +168,10 @@ class Cell(Enum):
     BOX_ON_GOAL = auto();
     OUT_OF_BOUNDS = auto();
     PLAYER = auto();
+    SCALE_TOGGLE = auto();
+    ROTATE_PAD = auto();
+    BOX_ON_SCALE_TOGGLE = auto();
+    BOX_ON_ROTATE_PAD = auto();
 
 class Color(Enum):
     """Enum for the different colors used in the grid."""
@@ -175,6 +181,10 @@ class Color(Enum):
     BOX      = (0.8, 0.5, 0.0)
     BOX_ON_GOAL = (0.4, 0.25, 0.0)
     PLAYER   = (0.2, 0.9, 0.2)
+    SCALE_TOGGLE = (0.0, 0.0, 1.0)
+    ROTATE_PAD = (0.0, 1.0, 1.0)
+    BOX_ON_SCALE_TOGGLE = (0.4, 0.2, 0.8)
+    BOX_ON_ROTATE_PAD = (0.0, 0.7, 0.6)
 
 # Maps Cell types to their corresponding colors for drawing.
 CELL_COLOR = {
@@ -184,15 +194,23 @@ CELL_COLOR = {
     Cell.BOX:          Color.BOX,
     Cell.BOX_ON_GOAL:  Color.BOX_ON_GOAL,
     Cell.PLAYER:       Color.PLAYER,
+    Cell.SCALE_TOGGLE: Color.SCALE_TOGGLE,
+    Cell.ROTATE_PAD:   Color.ROTATE_PAD,
+    Cell.BOX_ON_SCALE_TOGGLE: Color.BOX_ON_SCALE_TOGGLE,
+    Cell.BOX_ON_ROTATE_PAD: Color.BOX_ON_ROTATE_PAD,
 }
 
 def get_grid_type(code: int) -> Cell:
     """Helper function to convert the integer code from the grid to a Cell enum."""   
-    if code == 1:
-        return Cell.WALL
-    elif code == 2:
-        return Cell.GOAL
+    if code == 1: return Cell.WALL
+    if code == 2: return Cell.GOAL
+    if code == 3: return Cell.SCALE_TOGGLE
+    if code == 4: return Cell.ROTATE_PAD
     return Cell.EMPTY
+
+def is_walkable(cell_type: Cell) -> bool:
+    """Helper function to determine if the player or boxes can move on a cell of the given type."""
+    return cell_type in (Cell.EMPTY, Cell.GOAL, Cell.SCALE_TOGGLE, Cell.ROTATE_PAD)
 
 def draw_cell(row: int, col: int, cell_type: Cell) -> None:
     """Helper function to draw a single cell at the given row and column with the appropriate color."""
@@ -206,6 +224,7 @@ def draw_cell(row: int, col: int, cell_type: Cell) -> None:
     )
 
 def get_box_at(x, y):
+    """Helper function to check if there is a box at the given coordinates and return it."""
     for box in phase["boxes"]:
         if box.position.x == x and box.position.y == y:
             return box
@@ -230,6 +249,13 @@ def cell_at(x: int, y: int) -> Cell:
         # If the box is on a goal cell, return BOX_ON_GOAL
         if bottom_cell == Cell.GOAL:
             return Cell.BOX_ON_GOAL
+        
+        elif bottom_cell == Cell.SCALE_TOGGLE:
+            return Cell.BOX_ON_SCALE_TOGGLE
+        
+        elif bottom_cell == Cell.ROTATE_PAD:
+            return Cell.BOX_ON_ROTATE_PAD
+        
         else:
             return Cell.BOX
 
@@ -282,36 +308,80 @@ def handle_keypress(key, x: int, y: int) -> None:
     if key in MOVE_DELTAS:
         dx, dy = MOVE_DELTAS[key]
         handle_movement(dx, dy)
-    
-
     glutPostRedisplay()
 
-def handle_movement(dx, dy):
+def apply_rotation():
+    """Rotate the player's position 90 degrees clockwise around the center of the grid."""
+    player = phase["player"]
+    center_row = (phase["grid"].width - 1) / 2.0
+    center_col = (phase["grid"].height - 1) / 2.0
+    old_row, old_col = player.position.x, player.position.y
+
+    new_row = int(center_row + (old_col - center_col))
+    new_col = int(center_col - (old_row - center_row))
+
+    if 0 <= new_row < phase["grid"].width and 0 <= new_col < phase["grid"].height:
+        destination = cell_at(new_row, new_col)
+        if is_walkable(destination):
+            player.position.x, player.position.y = new_row, new_col
+            player.just_rotated = True
+        else:
+            print("Teleport blocked by wall.")
+    else:
+        print("Teleport out of bounds.")
+
+def apply_cell_effects(cell_type: Cell, player: Player) -> None:
+    """Apply effects associated with the cell type to the player."""
+    if cell_type == Cell.SCALE_TOGGLE or cell_type == Cell.BOX_ON_SCALE_TOGGLE:
+        pass
+    elif cell_type == Cell.ROTATE_PAD or cell_type == Cell.BOX_ON_ROTATE_PAD:
+        if not player.just_rotated:
+            apply_rotation()
+
+def try_step(dx: int, dy: int) -> bool:
+    """Attempt to move the player by (dx, dy). Returns True if the move was successful, False otherwise."""
     player = phase["player"]
     new_x = player.position.x + dx
     new_y = player.position.y + dy
-    # check what is in the cell the player is trying to move into
+
     target = cell_at(new_x, new_y)
-    # if it's empty or a goal, move the player there; if it's a box, check the cell beyond it and move both if possible
-    if target in (Cell.EMPTY, Cell.GOAL):
+
+    # If the target cell is empty or a goal, move the player there.
+    if is_walkable(target):
         player.position.x, player.position.y = new_x, new_y
-    elif target in (Cell.BOX, Cell.BOX_ON_GOAL):
-        # find the box object in phase["boxes"] at (new_x, new_y)
+        apply_cell_effects(target, player)
+        return True
+    
+    # If the target cell has a box, we need to check if the box can be moved in the same direction.
+    elif target in (Cell.BOX, Cell.BOX_ON_GOAL, Cell.BOX_ON_SCALE_TOGGLE, Cell.BOX_ON_ROTATE_PAD):
         box = get_box_at(new_x, new_y)
         if box:
-            # check cell beyond the box to understand if it can move or not
             beyond_x = new_x + dx
             beyond_y = new_y + dy
             beyond_target = cell_at(beyond_x, beyond_y)
-            if beyond_target in (Cell.EMPTY, Cell.GOAL):
-                # move the box
+            if is_walkable(beyond_target):
                 box.position.x, box.position.y = beyond_x, beyond_y
-                # move the player
                 player.position.x, player.position.y = new_x, new_y
+                apply_cell_effects(target, player)
+
+                return True
+    
+    # If we reach here, the move was not successful (either a wall, out of bounds, or an immovable box).
+    return False
+
+def handle_movement(dx, dy):
+    """Handles the logic for moving the player and boxes based on the attempted movement."""
+    player = phase["player"]
+    player.just_rotated = False
+
+    if try_step(dx, dy):
+        phase["movements_left"] -= 1
+        print(f"Player moved to ({player.position.x}, {player.position.y}). Movements left: {phase['movements_left']}")
     
     if check_victory():
-        print("Phase completed!")
-        glutSetWindowTitle(b"Phase Complete!")
+        """ If every box is on a goal, print "Phase completed!" and update the window title. """
+        print("Fase completa!")
+        glutSetWindowTitle(b"Fase completa!")
         # Disable further input after victory.
         glutKeyboardFunc(None)
 
